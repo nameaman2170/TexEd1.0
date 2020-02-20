@@ -52,17 +52,55 @@ char editorReadKey(){
 	}
 	return c;
 }
+// in windows read() does not work properly and 
+// goes in infinite loop
+int getCursorPosition(int *rows, int *cols){
+	char buf[32];
+	unsigned int i = 0;
+
+	if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+		
+	while(i < sizeof(buf)-1 ){
+		if(read(STDIN_FILENO, &buf[i], 1) != 1) break;
+		if(buf[i] == 'R') break;
+		i++;
+	}
+	buf[i] = '\0';
+	if(buf[0] != '\x1b' || buf[1] != '[') return -1;
+	if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+	
+	return 0;
+}
 int getWindowSize(int *rows, int *cols){
 	struct winsize ws;
-	if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0)
-		return -1;
-	else{
+	
+	if(ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0){
+		if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) 
+			return getCursorPosition(rows,cols);
+	}else{
 		*cols = ws.ws_col;
 		*rows = ws.ws_row;
 		return 0;
 	}
 }
 
+		/*Append Buffer*/
+struct abuf{
+	char *b;
+	int len;
+};
+#define ABUF_INIT {NULL,0};
+
+void abAppend(struct buf *ab, const char *s, int len ){
+	char *newstr = realloc(ab->b, ab->len + len);
+	if(newstr == NULL) return;
+	memcpy(&newtsr[ab->len], s, len);
+	ab->b = newstr;
+	ab->len += len;
+}
+void abFree(struct abuf *ab){
+	free(ab->b);
+}
 		/*input*/
 
 void editorProcessKeypress(){
@@ -81,11 +119,14 @@ void editorProcessKeypress(){
 
 void editorDrawRows(){
 	for(int i = 0; i < E.screenrows; i++){
-		write(STDOUT_FILENO,"~\r\n", 3);
+		write(STDOUT_FILENO,"~", 1);
+		if(i < E.screenrows-1)
+			write(STDOUT_FILENO,"\r\n", 2);
 	}
 }
+
 void editorRefreshScreen(){
-	write(STDOUT_FILENO, "\x1b[J", 4);//x1b for escape(27)
+	write(STDOUT_FILENO, "\x1b[2J", 4);//x1b for escape(27)
 	write(STDOUT_FILENO, "\x1b[H", 3);
 	editorDrawRows();
 	write(STDOUT_FILENO, "\x1b[H", 3);
