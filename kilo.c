@@ -1,4 +1,6 @@
 		/*INCLUDES*/
+#include<stdlib.h>
+#include<string.h>
 #include<stdio.h>
 #include<ctype.h>
 #include<stdlib.h>
@@ -7,6 +9,7 @@
 #include<errno.h>
 #include<sys/ioctl.h>
 		/*DEFINES*/
+#define KILO_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
 
 		/*DATA*/
@@ -91,10 +94,10 @@ struct abuf{
 };
 #define ABUF_INIT {NULL,0};
 
-void abAppend(struct buf *ab, const char *s, int len ){
+void abAppend(struct abuf *ab, const char *s, int len ){
 	char *newstr = realloc(ab->b, ab->len + len);
 	if(newstr == NULL) return;
-	memcpy(&newtsr[ab->len], s, len);
+	memcpy(&newstr[ab->len], s, len);
 	ab->b = newstr;
 	ab->len += len;
 }
@@ -117,19 +120,46 @@ void editorProcessKeypress(){
 	/*OUTPUT*/
 
 
-void editorDrawRows(){
-	for(int i = 0; i < E.screenrows; i++){
-		write(STDOUT_FILENO,"~", 1);
+void editorDrawRows(struct abuf *ab){
+	int i = 0;
+	for(i = 0; i < E.screenrows; i++){
+		abAppend(ab,"~", 1);
+		if(i == E.screenrows /3){
+			char welcome[80];
+			int welcomelen = snprintf(welcome, sizeof(welcome), "TexEd1.0 ----- %s", KILO_VERSION);
+			if(welcomelen > E.screencols)
+				welcomelen = E.screencols;
+			int padding = (E.screencols - welcomelen)/2;
+			if(padding){
+				abAppend(ab, "~", 1);
+				padding--;
+			}
+			while(padding--){
+				abAppend(ab," ", 1);
+			}
+			abAppend(ab, welcome, welcomelen);
+		}else{
+			abAppend(ab, "~", 1);
+		}
+		abAppend(ab, "\x1b[K", 3);
 		if(i < E.screenrows-1)
-			write(STDOUT_FILENO,"\r\n", 2);
+			abAppend(ab,"\r\n", 2);
 	}
 }
 
 void editorRefreshScreen(){
-	write(STDOUT_FILENO, "\x1b[2J", 4);//x1b for escape(27)
-	write(STDOUT_FILENO, "\x1b[H", 3);
-	editorDrawRows();
-	write(STDOUT_FILENO, "\x1b[H", 3);
+	struct abuf ab = ABUF_INIT;
+	
+	abAppend(&ab, "\x1b[?25l", 6);
+//	abAppend(&ab, "\x1b[2J", 4);//x1b for escape(27)
+	abAppend(&ab, "\x1b[H", 3);
+	
+	editorDrawRows(&ab);
+	
+	abAppend(&ab, "x1b[?25h", 6);
+	write(STDOUT_FILENO, ab.b, ab.len);
+	
+	abFree(&ab);
 }
 	
 	/*INIT*/
