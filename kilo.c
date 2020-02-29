@@ -8,6 +8,7 @@
 #include<unistd.h>
 #include<errno.h>
 #include<sys/ioctl.h>
+#include<sys/types.h>
 		/*DEFINES*/
 #define KILO_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f)
@@ -23,14 +24,21 @@ enum editorKey{
 	PAGE_DOWN
 };
 		/*DATA*/
+typedef struct erow{
+	int size;
+	char *chars;
+}erow;
 
 struct editorConfig{
 	int cx, cy;
 	int screenrows;
 	int screencols;
+	int numrows;
+	erow row;
 	struct termios orig_termios;
 };
 struct editorConfig E;
+
 		/*TERMINAL*/
 
 void die(const char *s){
@@ -103,24 +111,19 @@ int editorReadKey(){
 		return c;
 	}
 }
-// in windows read() does not work properly and 
-// goes in infinite loop
-int getCursorPosition(int *rows, int *cols){
+int getCursorPosition(int *rows, int *cols) {
 	char buf[32];
 	unsigned int i = 0;
-
-	if(write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
-		
-	while(i < sizeof(buf)-1 ){
-		if(read(STDIN_FILENO, &buf[i], 1) != 1) break;
-		if(buf[i] == 'R') break;
+	if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) return -1;
+	while (i < sizeof(buf) - 1) {
+		if (read(STDIN_FILENO, &buf[i], 1) != 1) break;
+		if (buf[i] == 'R') break;
 		i++;
 	}
-	buf[i] = '\0';
-	if(buf[0] != '\x1b' || buf[1] != '[') return -1;
-	if(sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
-	
-	return 0;
+  	buf[i] = '\0';
+  	if (buf[0] != '\x1b' || buf[1] != '[') return -1;
+  	if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) return -1;
+  	return 0;
 }
 int getWindowSize(int *rows, int *cols){
 	struct winsize ws;
@@ -135,13 +138,34 @@ int getWindowSize(int *rows, int *cols){
 	}
 }
 
+		/* file i/o */
+void editorOpen(char *filename){
+	FILE *fp = fopen(filename, "r");
+	if(!fp)
+		die("fopen");
+	char *line = NULL;
+	size_t linecap = 0;
+	ssize_t linelen;
+	linelen = getline(&line, &linecap, fp);
+	if(linelen != -1){
+		while(linelen > 0 && (line[linelen - 1] == '\n' ||
+		 				line[linelen - 1] == '\r'))
+			linelen--;
+		E.row.size = linelen;
+		E.row.chars = malloc(linelen + 1);
+		memcpy(E.row.chars, line, linelen);
+		E.row.chars[linelen] = '\0';
+		E.numrows = 1;
+	}
+	free(line);
+	fclose(fp);
+}
 		/*Append Buffer*/
 struct abuf{
 	char *b;
 	int len;
 };
 #define ABUF_INIT {NULL,0};
-
 void abAppend(struct abuf *ab, const char *s, int len ){
 	char *newstr = realloc(ab->b, ab->len + len);
 	if(newstr == NULL) return;
@@ -152,7 +176,8 @@ void abAppend(struct abuf *ab, const char *s, int len ){
 void abFree(struct abuf *ab){
 	free(ab->b);
 }
-		/*inp+ut*/
+
+		/*input*/
 void editorMoveCursor(int key){
 	switch(key){
 		case ARROW_LEFT:
@@ -205,35 +230,38 @@ void editorProcessKeypress(){
 }
 
 	/*OUTPUT*/
-
-
 void editorDrawRows(struct abuf *ab){
 	int i = 0;
 	for(i = 0; i < E.screenrows; i++){
-		abAppend(ab,"~", 1);
-		if(i == E.screenrows /3){
-			char welcome[80];
-			int welcomelen = snprintf(welcome, sizeof(welcome), "TexEd1.0 ----- %s", KILO_VERSION);
-			if(welcomelen > E.screencols)
-				welcomelen = E.screencols;
-			int padding = (E.screencols - welcomelen)/2;
-			if(padding){
+		if(i >= E.numrows){
+			if(i == E.screenrows /3){
+				char welcome[80];
+				int welcomelen = snprintf(welcome, sizeof(welcome), "TexEd1.0 ----- %s", KILO_VERSION);
+				if(welcomelen > E.screencols)
+					welcomelen = E.screencols;
+				int padding = (E.screencols - welcomelen)/2;
+				if(padding){
+					abAppend(ab, "~", 1);
+					padding--;
+				}
+				while(padding--){
+					abAppend(ab," ", 1);
+				}
+				abAppend(ab, welcome, welcomelen);
+			}else{
 				abAppend(ab, "~", 1);
-				padding--;
 			}
-			while(padding--){
-				abAppend(ab," ", 1);
-			}
-			abAppend(ab, welcome, welcomelen);
 		}else{
-			abAppend(ab, "~", 1);
+			int len = E.row.size;
+			if(len > E.screencols) 
+				len = E.screencols;
+			abAppend(ab, E.row.chars, len);	
 		}
 		abAppend(ab, "\x1b[K", 3);
 		if(i < E.screenrows-1)
 			abAppend(ab,"\r\n", 2);
 	}
 }
-
 void editorRefreshScreen(){
 	struct abuf ab = ABUF_INIT;
 	
@@ -248,18 +276,21 @@ void editorRefreshScreen(){
 	write(STDOUT_FILENO, ab.b, ab.len);
 	
 	abFree(&ab);
-}
-	
+}	
+
 	/*INIT*/
 void initEditor(){
 	E.cx = 0;
 	E.cy = 0;
+	E.numrows = 0;
 	if(getWindowSize(&E.screenrows, &E.screencols) == -1)
 		die("getWindowSize");
 }
-int main(){
-//	enableRawMode();
+int main(int argc, char *argv[]){
+	enableRawMode();
 	initEditor();
+	if(argc >= 2)
+		editorOpen(argv[1]);
 	while (1){
 		editorRefreshScreen();
 		editorProcessKeypress();
