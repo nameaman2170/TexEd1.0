@@ -66,6 +66,8 @@ struct editorConfig E;
 /*** prototypes ***/
 
 void editorSetStatusMessage(const char *fmt, ...);
+void editorRefreshScreen();
+char *editorPrompt(char *prompt);
 
 /*** terminal ***/
 
@@ -288,7 +290,7 @@ void editorInsertNewLine(){
     erow *row = &E.row[E.cy];
     editorInsertRow(E.cy + 1, &E.row->chars[E.cx], row->size - E.cx);
     row = &E.row[E.cy];
-    row->size = cx;
+    row->size = E.cx;
     row->chars[row->size] = '\0';
     editorUpdateRow(row);
   }
@@ -353,7 +355,10 @@ void editorOpen(char *filename) {
 }
 
 void editorSave(){
-  if(E.filename == NULL) return;
+
+  if(E.filename == NULL){
+    E.filename = editorPrompt("save as: %s");
+  }
   int len;
   char *buf = editorRowsToString(&len);
 
@@ -513,6 +518,31 @@ void editorSetStatusMessage(const char* fmt, ...){
   E.statusmsg_time = time(NULL);
 }
 /*** input ***/
+
+char *editorPrompt(char *prompt){
+  size_t bufsize = 128;
+  char *buf = malloc(bufsize);
+  size_t buflen = 0;
+  buf[0] = '\0';
+  while(1){
+    editorSetStatusMessage(prompt, buf);
+    editorRefreshScreen();
+    int c = editorReadKey();
+    if(c == '\r'){
+      if(buflen != 0){
+        editorSetStatusMessage("");
+        return buf;
+      }
+    }else if(!iscntrl(c) && c < 128){
+      if(buflen == bufsize - 1){
+        bufsize *= 2;
+        buf = realloc(buf, bufsize);
+      }
+      buf[buflen++] = c;
+      buf[buflen] = '\0';
+    }
+  }
+}
 
 void editorMoveCursor(int key) {
   erow *row = (E.cy >= E.numrows) ? NULL : &E.row[E.cy];
