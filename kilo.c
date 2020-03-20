@@ -38,6 +38,11 @@ enum editorKey {
   PAGE_DOWN
 };
 
+enum editorHighlight {
+  HL_NORMAL = 0,
+  HL_NUMBER
+};
+
 /*** data ***/
 
 typedef struct erow {
@@ -45,6 +50,7 @@ typedef struct erow {
   int rsize;
   char *chars;
   char *render;
+  unsigned char *hl;
 } erow;
 
 struct editorConfig {
@@ -183,6 +189,27 @@ int getWindowSize(int *rows, int *cols) {
   }
 }
 
+/*** syntax highlighting ***/
+
+void editorUpdateSyntax(erow *row) {
+  row->hl = realloc(row->hl, row->rsize);
+  memset(row->hl, HL_NORMAL, row->rsize);
+
+  int i;
+  for (i = 0; i < row->rsize; i++) {
+    if (isdigit(row->render[i])) {
+      row->hl[i] = HL_NUMBER;
+    }
+  }
+}
+
+int editorSyntaxToColor(int hl) {
+  switch (hl) {
+    case HL_NUMBER: return 31;
+    default: return 37;
+  }
+}
+
 /*** row operations ***/
 
 int editorRowCxToRx(erow *row, int cx) {
@@ -196,15 +223,15 @@ int editorRowCxToRx(erow *row, int cx) {
   return rx;
 }
 
-int editorRowRxToCx(erow *row, int rx){
+int editorRowRxToCx(erow *row, int rx) {
   int cur_rx = 0;
   int cx;
-  for(cx = 0; cx < row->size; cx++){
-    if(row->chars[cx] == '\t')
+  for (cx = 0; cx < row->size; cx++) {
+    if (row->chars[cx] == '\t')
       cur_rx += (KILO_TAB_STOP - 1) - (cur_rx % KILO_TAB_STOP);
     cur_rx++;
 
-    if(cur_rx > rx) return cx;
+    if (cur_rx > rx) return cx;
   }
   return cx;
 }
@@ -229,6 +256,8 @@ void editorUpdateRow(erow *row) {
   }
   row->render[idx] = '\0';
   row->rsize = idx;
+
+  editorUpdateSyntax(row);
 }
 
 void editorInsertRow(int at, char *s, size_t len) {
@@ -244,6 +273,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   E.row[at].rsize = 0;
   E.row[at].render = NULL;
+  E.row[at].hl = NULL;
   editorUpdateRow(&E.row[at]);
 
   E.numrows++;
@@ -253,6 +283,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 void editorFreeRow(erow *row) {
   free(row->render);
   free(row->chars);
+  free(row->hl);
 }
 
 void editorDelRow(int at) {
@@ -405,34 +436,34 @@ void editorSave() {
 
 /*** find ***/
 
-void editorFindCallback(char *query, int key){
+void editorFindCallback(char *query, int key) {
   static int last_match = -1;
   static int direction = 1;
 
-  if(key == '\r' || key == '\x1b'){
+  if (key == '\r' || key == '\x1b') {
     last_match = -1;
     direction = 1;
     return;
-  }else if(key == ARROW_RIGHT || key == ARROW_DOWN){
+  } else if (key == ARROW_RIGHT || key == ARROW_DOWN) {
     direction = 1;
-  }else if(key == ARROW_LEFT || key == ARROW_UP){
+  } else if (key == ARROW_LEFT || key == ARROW_UP) {
     direction = -1;
-  }else{
+  } else {
     last_match = -1;
     direction = 1;
   }
 
-  if(last_match == -1) direction = 1;
+  if (last_match == -1) direction = 1;
   int current = last_match;
   int i;
-  for(i = 0; i < E.numrows; i++){
+  for (i = 0; i < E.numrows; i++) {
     current += direction;
-    if(current == -1) current = E.numrows - 1;
-    else if(current == E.numrows) current = 0;
+    if (current == -1) current = E.numrows - 1;
+    else if (current == E.numrows) current = 0;
 
     erow *row = &E.row[current];
     char *match = strstr(row->render, query);
-    if(match){
+    if (match) {
       last_match = current;
       E.cy = current;
       E.cx = editorRowRxToCx(row, match - row->render);
@@ -442,15 +473,18 @@ void editorFindCallback(char *query, int key){
   }
 }
 
-void editorFind(){
+void editorFind() {
   int saved_cx = E.cx;
   int saved_cy = E.cy;
   int saved_coloff = E.coloff;
   int saved_rowoff = E.rowoff;
-  char *query = editorPrompt("search: %s ( use ESC/Arrow/Enter)", editorFindCallback);
-  if(query){
+
+  char *query = editorPrompt("Search: %s (Use ESC/Arrows/Enter)",
+                             editorFindCallback);
+
+  if (query) {
     free(query);
-  }else{
+  } else {
     E.cx = saved_cx;
     E.cy = saved_cy;
     E.coloff = saved_coloff;
@@ -526,7 +560,29 @@ void editorDrawRows(struct abuf *ab) {
       int len = E.row[filerow].rsize - E.coloff;
       if (len < 0) len = 0;
       if (len > E.screencols) len = E.screencols;
-      abAppend(ab, &E.row[filerow].render[E.coloff], len);
+      char *c = &E.row[filerow].render[E.coloff];
+      unsigned char *hl = &E.row[filerow].hl[E.coloff];
+      int current_color = -1;
+      int j;
+      for (j = 0; j < len; j++) {
+        if (hl[j] == HL_NORMAL) {
+          if (current_color != -1) {
+            abAppend(ab, "\x1b[39m", 5);
+            current_color = -1;
+          }
+          abAppend(ab, &c[j], 1);
+        } else {
+          int color = editorSyntaxToColor(hl[j]);
+          if (color != current_color) {
+            current_color = color;
+            char buf[16];
+            int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
+            abAppend(ab, buf, clen);
+          }
+          abAppend(ab, &c[j], 1);
+        }
+      }
+      abAppend(ab, "\x1b[39m", 5);
     }
 
     abAppend(ab, "\x1b[K", 3);
@@ -614,13 +670,13 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
       if (buflen != 0) buf[--buflen] = '\0';
     } else if (c == '\x1b') {
       editorSetStatusMessage("");
-      if(callback) callback(buf, c);
+      if (callback) callback(buf, c);
       free(buf);
       return NULL;
     } else if (c == '\r') {
       if (buflen != 0) {
         editorSetStatusMessage("");
-        if(callback) callback(buf, c);
+        if (callback) callback(buf, c);
         return buf;
       }
     } else if (!iscntrl(c) && c < 128) {
@@ -631,7 +687,8 @@ char *editorPrompt(char *prompt, void (*callback)(char *, int)) {
       buf[buflen++] = c;
       buf[buflen] = '\0';
     }
-    if(callback) callback(buf, c);
+
+    if (callback) callback(buf, c);
   }
 }
 
@@ -712,6 +769,7 @@ void editorProcessKeypress() {
     case CTRL_KEY('f'):
       editorFind();
       break;
+
     case BACKSPACE:
     case CTRL_KEY('h'):
     case DEL_KEY:
@@ -780,7 +838,8 @@ int main(int argc, char *argv[]) {
     editorOpen(argv[1]);
   }
 
-  editorSetStatusMessage("HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
+  editorSetStatusMessage(
+    "HELP: Ctrl-S = save | Ctrl-Q = quit | Ctrl-F = find");
 
   while (1) {
     editorRefreshScreen();
