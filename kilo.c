@@ -664,7 +664,7 @@ void editorFindCallback(char *query, int key) {
   }
 }
 
-void editorFind() {
+void editorFind() {k
   int saved_cx = E.cx;
   int saved_cy = E.cy;
   int saved_coloff = E.coloff;
