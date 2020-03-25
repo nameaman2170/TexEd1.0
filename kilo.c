@@ -253,7 +253,6 @@ void editorUpdateSyntax(erow *row) {
 
   int prev_sep = 1;
   int in_string = 0;
-  int in_comment = 0;
 
   int i = 0;
   while (i < row->rsize) {
