@@ -99,6 +99,7 @@ char *C_HL_extensions[] = { ".c", ".h", ".cpp", NULL };
 char *C_HL_keywords[] = {
   "switch", "if", "while", "for", "break", "continue", "return", "else",
   "struct", "union", "typedef", "static", "enum", "class", "case",
+
   "int|", "long|", "double|", "float|", "char|", "unsigned|", "signed|",
   "void|", NULL
 };
@@ -244,7 +245,9 @@ void editorUpdateSyntax(erow *row) {
   memset(row->hl, HL_NORMAL, row->rsize);
 
   if (E.syntax == NULL) return;
+
   char **keywords = E.syntax->keywords;
+
   char *scs = E.syntax->singleline_comment_start;
   char *mcs = E.syntax->multiline_comment_start;
   char *mce = E.syntax->multiline_comment_end;
@@ -272,7 +275,7 @@ void editorUpdateSyntax(erow *row) {
     if (mcs_len && mce_len && !in_string) {
       if (in_comment) {
         row->hl[i] = HL_MLCOMMENT;
-        if(strncmp(&row->render[i], mce, mce_len)){
+        if (!strncmp(&row->render[i], mce, mce_len)) {
           memset(&row->hl[i], HL_MLCOMMENT, mce_len);
           i += mce_len;
           in_comment = 0;
@@ -282,11 +285,11 @@ void editorUpdateSyntax(erow *row) {
           i++;
           continue;
         }
-      } else if (!strncmp(&row->render[i], mcs, mcs_len)){
-          memset(&row->hl[i], HL_MLCOMMENT, mcs_len);
-          i += mcs_len;
-          in_comment = 1;
-          continue;
+      } else if (!strncmp(&row->render[i], mcs, mcs_len)) {
+        memset(&row->hl[i], HL_MLCOMMENT, mcs_len);
+        i += mcs_len;
+        in_comment = 1;
+        continue;
       }
     }
 
@@ -322,20 +325,21 @@ void editorUpdateSyntax(erow *row) {
       }
     }
 
-    if(prev_sep){
+    if (prev_sep) {
       int j;
-      for(j = 0; keywords[j]; j++){
+      for (j = 0; keywords[j]; j++) {
         int klen = strlen(keywords[j]);
         int kw2 = keywords[j][klen - 1] == '|';
-        if(kw2) klen--;
+        if (kw2) klen--;
 
-        if(!strncmp(&row->render[i], keywords[j], klen) && is_separator(row->render[i + klen])){
+        if (!strncmp(&row->render[i], keywords[j], klen) &&
+            is_separator(row->render[i + klen])) {
           memset(&row->hl[i], kw2 ? HL_KEYWORD2 : HL_KEYWORD1, klen);
           i += klen;
           break;
         }
       }
-      if(keywords[j] != NULL){
+      if (keywords[j] != NULL) {
         prev_sep = 0;
         continue;
       }
@@ -348,7 +352,7 @@ void editorUpdateSyntax(erow *row) {
   int changed = (row->hl_open_comment != in_comment);
   row->hl_open_comment = in_comment;
   if (changed && row->idx + 1 < E.numrows)
-    editorUpdateSyntax(&E.row[row->idx+1]);
+    editorUpdateSyntax(&E.row[row->idx + 1]);
 }
 
 int editorSyntaxToColor(int hl) {
@@ -446,8 +450,7 @@ void editorInsertRow(int at, char *s, size_t len) {
 
   E.row = realloc(E.row, sizeof(erow) * (E.numrows + 1));
   memmove(&E.row[at + 1], &E.row[at], sizeof(erow) * (E.numrows - at));
-
-  for(int j = at+1; j <= E.numrows; j++) E.row[j].idx++;
+  for (int j = at + 1; j <= E.numrows; j++) E.row[j].idx++;
 
   E.row[at].idx = at;
 
@@ -476,7 +479,7 @@ void editorDelRow(int at) {
   if (at < 0 || at >= E.numrows) return;
   editorFreeRow(&E.row[at]);
   memmove(&E.row[at], &E.row[at + 1], sizeof(erow) * (E.numrows - at - 1));
-  for(int j = at; j < E.numrows; j++) E.row[j]--;
+  for (int j = at; j < E.numrows - 1; j++) E.row[j].idx--;
   E.numrows--;
   E.dirty++;
 }
@@ -769,17 +772,17 @@ void editorDrawRows(struct abuf *ab) {
       int current_color = -1;
       int j;
       for (j = 0; j < len; j++) {
-        if (iscntrl(c[j])){
+        if (iscntrl(c[j])) {
           char sym = (c[j] <= 26) ? '@' + c[j] : '?';
           abAppend(ab, "\x1b[7m", 4);
           abAppend(ab, &sym, 1);
           abAppend(ab, "\x1b[m", 3);
-          if(current_color != -1){
+          if (current_color != -1) {
             char buf[16];
             int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", current_color);
             abAppend(ab, buf, clen);
           }
-        }else if (hl[j] == HL_NORMAL) {
+        } else if (hl[j] == HL_NORMAL) {
           if (current_color != -1) {
             abAppend(ab, "\x1b[39m", 5);
             current_color = -1;
